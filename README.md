@@ -46,19 +46,37 @@ window.navigator.modelContext.registerTool({
 通常のブラウザではまだ `navigator.modelContext` が未実装の場合があります。
 その場合はWebMCP登録はされませんが、画面上の「LLMと読む」ボタンで同じ `execute` をローカル実行して挙動確認できます。
 
+## Cloudflare Pages公開
+
+Cloudflare Pagesでは以下で設定してください。
+
+```text
+Framework preset: Vite
+Build command: npm run build
+Build output directory: dist
+Node.js version: 22
+```
+
+`wrangler.toml` も追加済みです。
+
+```toml
+pages_build_output_dir = "dist"
+```
+
 ## ローカル確認
+
+Node.jsがある環境なら:
 
 ```bash
 cd /workspace/webmcp-article-reader-sample
-python3 -m http.server 8080
-# http://localhost:8080/static-demo.html を開く
+npm install
+npm run build
+npm run dev
 ```
 
-## React/Vite版
-
-この環境にはnpmが無かったので未検証ですが、Node.jsがある環境なら:
+依存なしHTML版だけ見る場合:
 
 ```bash
-npm install
-npm run dev
+python3 -m http.server 8080
+# http://localhost:8080/static-demo.html を開く
 ```
