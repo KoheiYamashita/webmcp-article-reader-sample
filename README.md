@@ -4,19 +4,22 @@
 
 ## GitHub Pages公開
 
-このリポジトリは GitHub Actions で `static-demo.html` を GitHub Pages に公開する設定済みです。
+Actionsのrunner待ちで詰まる場合があるため、`docs/index.html` から直接公開できる構成にしています。
 
 push後にGitHub上で一度だけ設定してください。
 
 1. Repository `Settings` を開く
 2. `Pages` を開く
-3. `Build and deployment` の `Source` を **GitHub Actions** にする
-4. `main` ブランチにpush
-5. Actionsの `Deploy static demo to GitHub Pages` 完了後、以下で開く
+3. `Build and deployment` の `Source` を **Deploy from a branch** にする
+4. `Branch` を `main`、folderを `/docs` にする
+5. Save
+6. 数分後、以下で開く
 
 ```text
 https://koheiyamashita.github.io/webmcp-article-reader-sample/
 ```
+
+補足: `.github/workflows/pages.yml` も残していますが、Actionsがqueuedで止まる場合は上記の `/docs` 公開の方を使ってください。
 
 ## 実装内容
 
