@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebMCP Article Reader Sample</title>
+    <style>
+      :root { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #172033; background: #f6f7fb; }
+      body { margin: 0; }
+      main { max-width: 960px; margin: 0 auto; padding: 48px 20px; }
+      .eyebrow { color: #5967ff; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+      h1 { font-size: 36px; margin: 0 0 12px; }
+      .notice, .tools, .card, .output { background: white; border: 1px solid #e4e7f0; border-radius: 18px; box-shadow: 0 10px 30px rgba(31,42,68,.06); }
+      .notice { padding: 14px 18px; margin: 18px 0; border-color: #ffd68a; background: #fff9ed; }
+      .tools { padding: 14px 18px; margin: 18px 0; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+      .card { padding: 22px; }
+      .card h2 { font-size: 22px; margin: 12px 0; }
+      .tags { display: flex; gap: 8px; flex-wrap: wrap; }
+      .tags span { background: #eef0ff; color: #4652d9; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; }
+      button { border: 0; background: #172033; color: white; border-radius: 999px; padding: 10px 16px; cursor: pointer; font-weight: 700; }
+      button:hover { background: #5967ff; }
+      .output { margin-top: 18px; padding: 22px; }
+      pre { background: #111827; color: #e5e7eb; border-radius: 14px; padding: 16px; overflow: auto; line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">WebMCP demo</p>
+        <h1>技術ブログを「LLMと読む」サンプル</h1>
+        <p>一覧ではタイトルと概要だけ表示。記事本文はWebMCP toolとして登録します。</p>
+      </header>
+
+      <section class="notice" id="supportNotice"></section>
+      <section class="tools"><strong>登録したWebMCP tools:</strong> <span id="tools"></span></section>
+      <section class="grid" id="articles"></section>
+      <section class="output">
+        <h2>デモ用: tool実行結果</h2>
+        <p id="selected">まだ未選択</p>
+        <pre id="output">WebMCP対応ブラウザ/エージェントなら navigator.modelContext のtoolとして見える想定です。この画面ではボタンで同じexecuteを実行します。</pre>
+      </section>
+    </main>
+
+    <script>
+      const articles = [
+        {
+          id: 'edge-sqlite',
+          title: 'Edge環境でSQLiteを使う設計パターン',
+          summary: 'D1、Turso、Litestreamを題材に、エッジ近傍DBの使い分けを整理します。',
+          url: 'https://example.com/edge-sqlite',
+          tags: ['sqlite', 'edge', 'database'],
+          markdown: `# Edge環境でSQLiteを使う設計パターン\n\nこの記事では、Edge環境でSQLiteを扱う代表的な選択肢を比較します。\n\n## 要点\n\n- 読み取り中心ならレプリカ配布が強い\n- 書き込みが多いなら整合性モデルを先に決める\n- Cloudflare D1、Turso、Litestreamは思想が異なる\n\n## まとめ\n\n小規模サービスではSQLiteの単純さを保ちつつ、配布やバックアップの仕組みだけ足すのが現実的です。`
+        },
+        {
+          id: 'webmcp-reader',
+          title: 'WebMCPで記事をLLMと読むUIを作る',
+          summary: 'Webページ側が記事本文をtoolとして公開し、ユーザーのLLMが必要な時だけ読む設計です。',
+          url: 'https://example.com/webmcp-reader',
+          tags: ['webmcp', 'llm', 'browser'],
+          markdown: `# WebMCPで記事をLLMと読むUIを作る\n\nWebMCPでは、Webページ自体がブラウザ内でLLM向けのtoolを公開できます。\n\n## 体験\n\n1. ユーザーは記事一覧を見る\n2. 気になった記事の「LLMと読む」を押す\n3. LLMクライアントがページのtoolを呼び、記事本文を取得する\n4. ユーザーは会話しながら読み進める\n\n## 利点\n\n本文を最初からLLMに渡さず、必要な記事だけ構造化して渡せます。`
+        }
+      ];
+
+      const registeredTools = [];
+
+      function toolResultText(obj) {
+        return { content: [{ type: 'text', text: JSON.stringify(obj, null, 2) }] };
+      }
+
+      const listArticlesTool = {
+        name: 'list_articles',
+        description: 'Return article list with title, summary, url and tags only. Does not return full article body.',
+        inputSchema: { type: 'object', properties: {} },
+        execute() {
+          return toolResultText({
+            articles: articles.map(({ id, title, summary, url, tags }) => ({ id, title, summary, url, tags }))
+          });
+        }
+      };
+
+      function articlePayload(article) {
+        return {
+          title: article.title,
+          url: article.url,
+          tags: article.tags,
+          contentType: 'text/markdown',
+          markdown: article.markdown,
+          suggestedPrompt: `この記事「${article.title}」を日本語で一緒に読み進めて。まず要点を短く説明して、その後に質問を受けて。`
+        };
+      }
+
+      let currentArticleId = articles[0].id;
+
+      const loadArticleTool = {
+        name: 'load_article_for_llm',
+        description: 'Load one selected article as Markdown so the user can read it conversationally with an LLM. Japanese: 記事を読む、記事本文を取得する。',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            articleId: { type: 'string', description: 'The article id to load. Use list_articles first if unknown.' }
+          },
+          required: ['articleId']
+        },
+        execute({ articleId }) {
+          const article = articles.find(a => a.id === articleId);
+          if (!article) throw new Error(`Article not found: ${articleId}`);
+          currentArticleId = articleId;
+          return toolResultText(articlePayload(article));
+        }
+      };
+
+      const readCurrentArticleTool = {
+        name: 'read_current_article',
+        description: 'Read the currently selected article. Use this when the user says 記事を読む or LLMと読む.',
+        inputSchema: { type: 'object', properties: {} },
+        execute() {
+          const article = articles.find(a => a.id === currentArticleId) || articles[0];
+          return toolResultText(articlePayload(article));
+        }
+      };
+
+      const getPageContentTool = {
+        name: 'get_page_content',
+        description: 'Return the current page content and the selected article body for an LLM reader.',
+        inputSchema: { type: 'object', properties: {} },
+        execute() {
+          const article = articles.find(a => a.id === currentArticleId) || articles[0];
+          return toolResultText({
+            pageTitle: document.title,
+            visibleArticles: articles.map(({ id, title, summary, tags }) => ({ id, title, summary, tags })),
+            selectedArticle: articlePayload(article)
+          });
+        }
+      };
+
+      function registerWebMCPTool(tool) {
+        registeredTools.push(tool);
+
+        // Real WebMCP proposal API:
+        // https://webmachinelearning.github.io/webmcp/docs/proposal.html
+        if ('modelContext' in window.navigator && typeof window.navigator.modelContext.registerTool === 'function') {
+          window.navigator.modelContext.registerTool(tool);
+          return 'real';
+        }
+
+        return 'unsupported';
+      }
+
+      const support = [listArticlesTool, loadArticleTool, readCurrentArticleTool, getPageContentTool].map(registerWebMCPTool);
+      const hasRealWebMCP = support.includes('real');
+
+      async function runToolLocallyForDemo(toolName, input) {
+        const tool = registeredTools.find(t => t.name === toolName);
+        if (!tool) throw new Error(`Tool not found: ${toolName}`);
+        return await tool.execute(input, {
+          requestUserInteraction: async fn => fn()
+        });
+      }
+
+      async function readWithLLM(articleId) {
+        const result = await runToolLocallyForDemo('load_article_for_llm', { articleId });
+        document.getElementById('selected').textContent = `selected article: ${articleId}`;
+        document.getElementById('output').textContent = result.content[0].text;
+      }
+
+      function render() {
+        document.getElementById('supportNotice').textContent = hasRealWebMCP
+          ? 'このブラウザは navigator.modelContext に対応しています。toolsを実際にWebMCP登録しました。'
+          : 'このブラウザはまだ navigator.modelContext に未対応です。ただしコードはWebMCP proposalの registerTool 形式で実装済みです。下のボタンはローカルデモ実行です。';
+        document.getElementById('tools').textContent = registeredTools.map(t => t.name).join(', ');
+        document.getElementById('articles').innerHTML = articles.map(article => `
+          <article class="card">
+            <div class="tags">${article.tags.map(tag => `<span>${tag}</span>`).join('')}</div>
+            <h2>${article.title}</h2>
+            <p>${article.summary}</p>
+            <button data-article-id="${article.id}">LLMと読む</button>
+          </article>
+        `).join('');
+        document.querySelectorAll('button[data-article-id]').forEach(button => {
+          button.addEventListener('click', () => readWithLLM(button.dataset.articleId));
+        });
+      }
+
+      render();
+    </script>
+  </body>
+</html>
